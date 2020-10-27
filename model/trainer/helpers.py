@@ -7,6 +7,10 @@ from model.dataloader.samplers import CategoriesSampler, RandomSampler, ClassSam
 from model.models.protonet import ProtoNet
 from model.models.matchnet import MatchNet
 from model.models.feat import FEAT
+from model.models.featv2 import FEATV2
+from model.models.saq import SAQ
+from model.models.ssa import SSA
+from model.models.feat_wo_reg import FEAT_WO_REG
 from model.models.featstar import FEATSTAR
 from model.models.deepset import DeepSet
 from model.models.bilstm import BILSTM

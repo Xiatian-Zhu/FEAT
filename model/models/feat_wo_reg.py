@@ -78,7 +78,7 @@ class MultiHeadAttention(nn.Module):
 
         return output
     
-class FEAT(FewShotModel):
+class FEAT_WO_REG(FewShotModel):
     def __init__(self, args):
         super().__init__(args)
         if args.backbone_class == 'ConvNet':
@@ -109,9 +109,6 @@ class FEAT(FewShotModel):
     
         # query: (num_batch, num_query, num_proto, num_emb)
         # proto: (num_batch, num_proto, num_emb)
-        print(f"====== A: {proto.shape}")
-        import pdb
-        pdb.set_trace()
         proto = self.slf_attn(proto, proto, proto)        
         if self.args.use_euclidean:
             query = query.view(-1, emb_dim).unsqueeze(1) # (Nbatch*Nq*Nw, 1, d)
@@ -127,7 +124,7 @@ class FEAT(FewShotModel):
             logits = logits.view(-1, num_proto)
         
         # for regularization
-        if self.training:
+        if False: #dself.training:
             aux_task = torch.cat([support.view(1, self.args.shot, self.args.way, emb_dim), 
                                   query.view(1, self.args.query, self.args.way, emb_dim)], 1) # T x (K+Kq) x N x d
             # print(f'aux A: {aux_task.shape}')

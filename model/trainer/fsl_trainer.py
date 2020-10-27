@@ -133,7 +133,7 @@ class FSLTrainer(Trainer):
                 else:
                     data = batch[0]
 
-                logits = self.model(data)
+                logits, _ = self.model(data)
                 loss = F.cross_entropy(logits, label)
                 acc = count_acc(logits, label)
                 record[i-1, 0] = loss.item()
@@ -172,7 +172,7 @@ class FSLTrainer(Trainer):
                 else:
                     data = batch[0]
 
-                logits = self.model(data)
+                logits, _ = self.model(data)
                 loss = F.cross_entropy(logits, label)
                 acc = count_acc(logits, label)
                 record[i-1, 0] = loss.item()
@@ -205,4 +205,4 @@ class FSLTrainer(Trainer):
                 self.trlog['max_acc_interval']))
             f.write('Test acc={:.4f} + {:.4f}\n'.format(
                 self.trlog['test_acc'],
-                self.trlog['test_acc_interval']))            
+                self.trlog['test_acc_interval']))  

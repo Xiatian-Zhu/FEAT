@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 from model.models import FewShotModel
 
+# No-Reg for FEAT-STAR here
+
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
@@ -17,17 +19,12 @@ class ScaledDotProductAttention(nn.Module):
     def forward(self, q, k, v):
 
         attn = torch.bmm(q, k.transpose(1, 2))
-        # print(f'o==> A attn: {attn.shape}')
+        # print(f'**==> attn: {attn.shape}')
         attn = attn / self.temperature
-        # print(f'o==> B attn: {attn.shape}')
         log_attn = F.log_softmax(attn, 2)
-        # print(f'o==> C attn: {log_attn.shape}')
         attn = self.softmax(attn)
-        # print(f'o==> D attn: {attn.shape}')
         attn = self.dropout(attn)
         output = torch.bmm(attn, v)
-        # print(f'o==> E V: {v.shape}')
-        # print(f'o==> F output: {output.shape}')
         return output, attn, log_attn
 
 class MultiHeadAttention(nn.Module):
@@ -58,6 +55,7 @@ class MultiHeadAttention(nn.Module):
         sz_b, len_q, _ = q.size()
         sz_b, len_k, _ = k.size()
         sz_b, len_v, _ = v.size()
+        # print(f"attn: len_q={len_q}, len_k={len_k}, len_v={len_v}")
 
         residual = q
         q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
@@ -65,8 +63,11 @@ class MultiHeadAttention(nn.Module):
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
         
         q = q.permute(2, 0, 1, 3).contiguous().view(-1, len_q, d_k) # (n*b) x lq x dk
+        # print(f'o==> Q: {q.shape}')
         k = k.permute(2, 0, 1, 3).contiguous().view(-1, len_k, d_k) # (n*b) x lk x dk
+        # print(f'o==> K: {k.shape}')
         v = v.permute(2, 0, 1, 3).contiguous().view(-1, len_v, d_v) # (n*b) x lv x dv
+        # print(f'o==> V: {v.shape}')
 
         output, attn, log_attn = self.attention(q, k, v)
 
@@ -78,7 +79,7 @@ class MultiHeadAttention(nn.Module):
 
         return output
     
-class FEAT(FewShotModel):
+class SAQ(FewShotModel):
     def __init__(self, args):
         super().__init__(args)
         if args.backbone_class == 'ConvNet':
@@ -96,71 +97,86 @@ class FEAT(FewShotModel):
         
     def _forward(self, instance_embs, support_idx, query_idx):
         emb_dim = instance_embs.size(-1)
-
+        # import pdb
+        # print(f'aa: {instance_embs.shape}')
+        # print(f'bb: {support_idx.shape}')
+        # print(support_idx)
+        # print(f'cc: {query_idx.shape}')
+        # print(query_idx)
+        num_batch = support_idx.shape[0]
+        num_shot =support_idx.shape[1]
+        num_way = support_idx.shape[-1]
+        num_support = int(np.prod(support_idx.shape[-2:])) # support_idx.shape[1] * num_way
+        num_query = int(np.prod(query_idx.shape[-2:]))
+        # print(f"o==>num_way={num_way}, num_support={num_support}, num_query={num_query}")
         # organize support/query data
         support = instance_embs[support_idx.contiguous().view(-1)].contiguous().view(*(support_idx.shape + (-1,)))
+        # print(f'dd: {support.shape}')
         query   = instance_embs[query_idx.contiguous().view(-1)].contiguous().view(  *(query_idx.shape   + (-1,)))
+        # print(f'ee: {query.shape}')
     
         # get mean of the support
-        proto = support.mean(dim=1) # Ntask x NK x d
-        num_batch = proto.shape[0]
-        num_proto = proto.shape[1]
-        num_query = np.prod(query_idx.shape[-2:])
+        # proto = support.mean(dim=1) # Ntask x NK x d
+        # print(f'ff: {proto.shape}')
+        # num_batch = proto.shape[0]
+        num_proto = num_way #  proto.shape[1]
+        # num_query = np.prod(query_idx.shape[-2:])
     
         # query: (num_batch, num_query, num_proto, num_emb)
         # proto: (num_batch, num_proto, num_emb)
-        print(f"====== A: {proto.shape}")
-        import pdb
-        pdb.set_trace()
-        proto = self.slf_attn(proto, proto, proto)        
+        query = query.view(-1, emb_dim).unsqueeze(1)
+        # print(f'gg: {query.shape}')
+
+
+        support = support.view(num_batch, num_support, emb_dim)
+        # print(f'Support A: {support.shape}')
+        support = support.unsqueeze(1).expand(num_batch, num_query, num_support, emb_dim)
+        # print(f'Support B: {support.shape}')
+        support = support.view(num_batch*num_query, num_support, emb_dim)
+        # print(f'Support C: {support.shape}')
+        
+        combined_ = torch.cat([support, query], 1)
+        # print(f'COmbined_ A: {combined_.shape}')
+
+        combined_1 = self.slf_attn(combined_, support, support)
+        # pdb.set_trace()
+        # os_ = self.slf_attn(support, support, support)
+
+        # print(f'COmbined_ B: {combined_1.shape}')
+        support, query = combined_1.split(num_support, 1)
+        # print(f'COmbined_ D: {support.shape}')
+        # print(f'COmbined_ E: {query.shape}')
+
+        support = support.view(num_batch*num_query, num_shot, num_way, emb_dim)
+        proto = support.mean(dim=1)
+        # print(f'support F: {support.shape}')
+        # print(f'support G: {proto.shape}')
+        # pdb.set_trace()
+
+        # proto = proto.unsqueeze(1).expand(num_batch, num_query, num_proto, emb_dim).contiguous()
+        # print(f'A: {proto.shape}')
+        # proto = proto.view(num_batch*num_query, num_proto, emb_dim)
+        # print(f'B: {proto.shape}')
+
+        # refine by Transformer
+        # combined = torch.cat([proto, query], 1) # Nk x (N + 1) x d, batch_size = NK
+        # print(f'C: {combined.shape}')
+        # combined = self.slf_attn(combined, combined, combined)
+        # # compute distance for all batches
+        # proto, query = combined.split(num_proto, 1)
+        # print(f'D: {proto.shape}')
+        # print(f'E: {query.shape}')
+        
         if self.args.use_euclidean:
             query = query.view(-1, emb_dim).unsqueeze(1) # (Nbatch*Nq*Nw, 1, d)
-            proto = proto.unsqueeze(1).expand(num_batch, num_query, num_proto, emb_dim).contiguous()
-            proto = proto.view(num_batch*num_query, num_proto, emb_dim) # (Nbatch x Nq, Nk, d)
+            # print(f'F: {query.shape}')
 
             logits = - torch.sum((proto - query) ** 2, 2) / self.args.temperature
-        else:
+            # print(f'G: {logits.shape}')
+        else: # cosine similarity: more memory efficient
             proto = F.normalize(proto, dim=-1) # normalize for cosine distance
-            query = query.view(num_batch, -1, emb_dim) # (Nbatch,  Nq*Nw, d)
-
+            
             logits = torch.bmm(query, proto.permute([0,2,1])) / self.args.temperature
             logits = logits.view(-1, num_proto)
         
-        # for regularization
-        if self.training:
-            aux_task = torch.cat([support.view(1, self.args.shot, self.args.way, emb_dim), 
-                                  query.view(1, self.args.query, self.args.way, emb_dim)], 1) # T x (K+Kq) x N x d
-            # print(f'aux A: {aux_task.shape}')
-            num_query = np.prod(aux_task.shape[1:3])
-            aux_task = aux_task.permute([0, 2, 1, 3])
-            # print(f'aux B: {aux_task.shape}')
-            aux_task = aux_task.contiguous().view(-1, self.args.shot + self.args.query, emb_dim)
-            # print(f'aux C: {aux_task.shape}')
-            # apply the transformation over the Aug Task
-            aux_emb = self.slf_attn(aux_task, aux_task, aux_task) # T x N x (K+Kq) x d
-            # print(f'aux D: {aux_emb.shape}')
-            # compute class mean
-            aux_emb = aux_emb.view(num_batch, self.args.way, self.args.shot + self.args.query, emb_dim)
-            # print(f'aux E: {aux_emb.shape}')
-            aux_center = torch.mean(aux_emb, 2) # T x N x d
-            # print(f'aux F: {aux_center.shape}')
-            
-            # import pdb
-            # pdb.set_trace()
-
-            if self.args.use_euclidean:
-                aux_task = aux_task.permute([1,0,2]).contiguous().view(-1, emb_dim).unsqueeze(1) # (Nbatch*Nq*Nw, 1, d)
-                aux_center = aux_center.unsqueeze(1).expand(num_batch, num_query, num_proto, emb_dim).contiguous()
-                aux_center = aux_center.view(num_batch*num_query, num_proto, emb_dim) # (Nbatch x Nq, Nk, d)
-    
-                logits_reg = - torch.sum((aux_center - aux_task) ** 2, 2) / self.args.temperature2
-            else:
-                aux_center = F.normalize(aux_center, dim=-1) # normalize for cosine distance
-                aux_task = aux_task.permute([1,0,2]).contiguous().view(num_batch, -1, emb_dim) # (Nbatch,  Nq*Nw, d)
-    
-                logits_reg = torch.bmm(aux_task, aux_center.permute([0,2,1])) / self.args.temperature2
-                logits_reg = logits_reg.view(-1, num_proto)            
-            
-            return logits, logits_reg            
-        else:
-            return logits, None   
+        return logits, None

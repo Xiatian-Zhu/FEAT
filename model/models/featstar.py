@@ -19,6 +19,7 @@ class ScaledDotProductAttention(nn.Module):
     def forward(self, q, k, v):
 
         attn = torch.bmm(q, k.transpose(1, 2))
+        # print(f'**==> attn: {attn.shape}')
         attn = attn / self.temperature
         log_attn = F.log_softmax(attn, 2)
         attn = self.softmax(attn)
@@ -50,6 +51,8 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, q, k, v):
+        import pdb
+        pdb.set_trace()
         d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
         sz_b, len_q, _ = q.size()
         sz_b, len_k, _ = k.size()
@@ -61,8 +64,11 @@ class MultiHeadAttention(nn.Module):
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
         
         q = q.permute(2, 0, 1, 3).contiguous().view(-1, len_q, d_k) # (n*b) x lq x dk
+        # print(f'o==> Q: {q.shape}')
         k = k.permute(2, 0, 1, 3).contiguous().view(-1, len_k, d_k) # (n*b) x lk x dk
+        # print(f'o==> K: {k.shape}')
         v = v.permute(2, 0, 1, 3).contiguous().view(-1, len_v, d_v) # (n*b) x lv x dv
+        # print(f'o==> V: {v.shape}')
 
         output, attn, log_attn = self.attention(q, k, v)
 
@@ -92,13 +98,20 @@ class FEATSTAR(FewShotModel):
         
     def _forward(self, instance_embs, support_idx, query_idx):
         emb_dim = instance_embs.size(-1)
-
+        # print(f'aa: {instance_embs.shape}')
+        # print(f'bb: {support_idx.shape}')
+        # print(support_idx)
+        # print(f'cc: {query_idx.shape}')
+        # print(query_idx)
         # organize support/query data
         support = instance_embs[support_idx.contiguous().view(-1)].contiguous().view(*(support_idx.shape + (-1,)))
+        # print(f'dd: {support.shape}')
         query   = instance_embs[query_idx.contiguous().view(-1)].contiguous().view(  *(query_idx.shape   + (-1,)))
+        # print(f'ee: {query.shape}')
     
         # get mean of the support
         proto = support.mean(dim=1) # Ntask x NK x d
+        # print(f'ff: {proto.shape}')
         num_batch = proto.shape[0]
         num_proto = proto.shape[1]
         num_query = np.prod(query_idx.shape[-2:])
@@ -106,24 +119,35 @@ class FEATSTAR(FewShotModel):
         # query: (num_batch, num_query, num_proto, num_emb)
         # proto: (num_batch, num_proto, num_emb)
         query = query.view(-1, emb_dim).unsqueeze(1)
+        # print(f'gg: {query.shape}')
 
         proto = proto.unsqueeze(1).expand(num_batch, num_query, num_proto, emb_dim).contiguous()
+        # print(f'A: {proto.shape}')
         proto = proto.view(num_batch*num_query, num_proto, emb_dim)
+        # print(f'B: {proto.shape}')
 
         # refine by Transformer
         combined = torch.cat([proto, query], 1) # Nk x (N + 1) x d, batch_size = NK
+        # print(f'C: {combined.shape}')
         combined = self.slf_attn(combined, combined, combined)
         # compute distance for all batches
         proto, query = combined.split(num_proto, 1)
+        # print(f'D: {proto.shape}')
+        # print(f'E: {query.shape}')
         
         if self.args.use_euclidean:
             query = query.view(-1, emb_dim).unsqueeze(1) # (Nbatch*Nq*Nw, 1, d)
+            # print(f'F: {query.shape}')
 
             logits = - torch.sum((proto - query) ** 2, 2) / self.args.temperature
+            # print(f'G: {logits.shape}')
         else: # cosine similarity: more memory efficient
             proto = F.normalize(proto, dim=-1) # normalize for cosine distance
             
             logits = torch.bmm(query, proto.permute([0,2,1])) / self.args.temperature
             logits = logits.view(-1, num_proto)
         
+        # import pdb
+        # pdb.set_trace()
+
         return logits, None

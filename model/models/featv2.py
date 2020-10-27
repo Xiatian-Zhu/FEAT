@@ -78,7 +78,7 @@ class MultiHeadAttention(nn.Module):
 
         return output
     
-class FEAT(FewShotModel):
+class FEATV2(FewShotModel):
     def __init__(self, args):
         super().__init__(args)
         if args.backbone_class == 'ConvNet':
@@ -93,6 +93,7 @@ class FEAT(FewShotModel):
             raise ValueError('')
         
         self.slf_attn = MultiHeadAttention(1, hdim, hdim, hdim, dropout=0.5)          
+        self.slf_attn_reg = MultiHeadAttention(1, hdim, hdim, hdim, dropout=0.5)          
         
     def _forward(self, instance_embs, support_idx, query_idx):
         emb_dim = instance_embs.size(-1)
@@ -109,9 +110,6 @@ class FEAT(FewShotModel):
     
         # query: (num_batch, num_query, num_proto, num_emb)
         # proto: (num_batch, num_proto, num_emb)
-        print(f"====== A: {proto.shape}")
-        import pdb
-        pdb.set_trace()
         proto = self.slf_attn(proto, proto, proto)        
         if self.args.use_euclidean:
             query = query.view(-1, emb_dim).unsqueeze(1) # (Nbatch*Nq*Nw, 1, d)
@@ -137,7 +135,8 @@ class FEAT(FewShotModel):
             aux_task = aux_task.contiguous().view(-1, self.args.shot + self.args.query, emb_dim)
             # print(f'aux C: {aux_task.shape}')
             # apply the transformation over the Aug Task
-            aux_emb = self.slf_attn(aux_task, aux_task, aux_task) # T x N x (K+Kq) x d
+            # aux_emb = self.slf_attn(aux_task, aux_task, aux_task) # T x N x (K+Kq) x d
+            aux_emb = self.slf_attn_reg(aux_task, aux_task, aux_task) # T x N x (K+Kq) x d
             # print(f'aux D: {aux_emb.shape}')
             # compute class mean
             aux_emb = aux_emb.view(num_batch, self.args.way, self.args.shot + self.args.query, emb_dim)
